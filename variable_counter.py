@@ -25,14 +25,22 @@ def convert_binary_op_to_var_plus_int(term):
             # Get variable and integer value times multiplier
             if term['left'].type == clingo.ast.ASTType.Variable and \
                     term['right'].type == clingo.ast.ASTType.Symbol:
-                value = int(str(term['right']['symbol']))  # Can this cause errors?
+                # TODO: Error handling for conversion of symbol to int when
+                #        symbol is alphabetic instead of numeric.
+                #       Note that adding an alphabetic value is logic nonsense,
+                #        but is syntactically valid
+                value = int(str(term['right']['symbol']))
                 return term['left'], (value * multiplier)
 
             # Must also ensure variable is not being subtracted
             elif term['left'].type == clingo.ast.ASTType.Symbol and \
                     term['right'].type == clingo.ast.ASTType.Variable and \
                     term['operator'] == clingo.ast.BinaryOperator.Plus:
-                value = int(str(term['left']['symbol']))  # Can this cause errors?
+                # TODO: Error handling for conversion of symbol to int when
+                #        symbol is alphabetic instead of numeric.
+                #       Note that adding an alphabetic value is logic nonsense,
+                #        but is syntactically valid
+                value = int(str(term['left']['symbol']))
                 return term['right'], value
 
     # If no usable binary operation conversion found, return failure
@@ -75,28 +83,6 @@ def convert_binary_op_to_vars(term1, term2, comparison):
     else:
         return None, None, None  # Failure indicator
 
-def convert_binary_op_to_vars_eq(term1, term2, comparison):
-    """
-        eq
-    """
-    var1, int1 = convert_binary_op_to_var_plus_int(term1)  # Returns None, None if no conversion found
-    var2, int2 = convert_binary_op_to_var_plus_int(term2)
-
-    candidate = False  # Flag to track whether a valid conversion was found
-
-    if var1 and var2:
-        diff = int2 - int1
-
-        # Cases defined in README
-        if diff == 0:
-            if comparison == clingo.ast.ComparisonOperator.Equal:
-                candidate = True       
-
-    # if no cases met, return None, None, None to indicate inelegibility for conversion
-    if candidate:
-        return var1, var2, comparison
-    else:
-        return None, None, None  # Failure indicator
 
 class VariableCounter:
     """This class is used to track how much a variable is used within a rule"""
@@ -104,7 +90,6 @@ class VariableCounter:
     def __init__(self):
         self.variable_count = {}
         self.comparison_variables = {'greatThan': {}, 'notEqual': {}}
-        self.comparison_variables_eq ={'equal':{}}
 
     def increment(self, var_name):
         """Increments the variable counter"""
@@ -148,28 +133,6 @@ class VariableCounter:
                 else:
                     self.comparison_variables['greatThan'][var2] = [var1]
 
-            
-    def mark_comparison_eq(self, var1, var2, comparison):
-        """    
-            Marks the variables as being used in a (non-Equal) 
-                comparison literal and ensures the variable is not a constant
-        """
-        var1, var2, comparison = convert_binary_op_to_vars_eq(var1, var2, comparison)
-
-        if var1 and var2:  # Var1 and Var2 not None (indicates non-candidate comparison)
-            var1 = var1.name
-            var2 = var2.name
-            if comparison == clingo.ast.ComparisonOperator.Equal:  
-                # Make notEqual dictionary entry of var1: [var2] and var2: [var1]
-                if self.comparison_variables_eq['equal'].has_key(var1):
-                    self.comparison_variables_eq['equal'][var1].append(var2)
-                else:
-                    self.comparison_variables_eq['equal'][var1] = [var2]
-                if self.comparison_variables_eq['equal'].has_key(var2):
-                    self.comparison_variables_eq['equal'][var2].append(var1)
-                else:
-                    self.comparison_variables_eq['equal'][var2] = [var1]
-
     def longest_path_finder(self, comp_type, seen_set, current_var):
         """
             Given a comparison type, set of variables already seen,
@@ -178,18 +141,11 @@ class VariableCounter:
                 between variables, recursively exploring each path in 
                 the comparison 'tree' of given comparison type
         """
-
-
-        comparison_variables=self.comparison_variables
-
-        if comp_type == 'equal':
-            comparison_variables=self.comparison_variables_eq
-
         # First check special cases for each comparison type
         if comp_type == 'greatThan':
             # Abort path if a cycle is found in greatThan case, for this means nonsense logic
-            if comparison_variables[comp_type].has_key(current_var):
-                for nextVar in comparison_variables[comp_type][current_var]:
+            if self.comparison_variables[comp_type].has_key(current_var):
+                for nextVar in self.comparison_variables[comp_type][current_var]:
                     if nextVar in seen_set:  # if we've seen a var which currVar is greater than...
                         return []
 
@@ -197,15 +153,15 @@ class VariableCounter:
             # Simpy return current path if current variable does not 
             #  have a comparison with all other seen variables, in notEqual case
             for seenVar in seen_set:
-                if current_var not in comparison_variables[comp_type][seenVar]:
+                if current_var not in self.comparison_variables[comp_type][seenVar]:
                     return list(seen_set)
 
         # Add current variable to the path and the set of seen variables
         seen_set.add(current_var)
 
         # Get set of variables having a comparison with the current variable
-        if comparison_variables[comp_type].has_key(current_var):  # error checking
-            nextVars = set([nextVar for nextVar in comparison_variables[comp_type][current_var]])
+        if self.comparison_variables[comp_type].has_key(current_var):  # error checking
+            nextVars = set([nextVar for nextVar in self.comparison_variables[comp_type][current_var]])
             operating_set = nextVars
         else:
             operating_set = set()
@@ -236,34 +192,10 @@ class VariableCounter:
                 both types of comparisons
             This function is called in EquivalenceTransformer.rewritable
         """
-        comparison_variables=self.comparison_variables
-
         # For both comparison types, find the longest comparison path starting from each variable
         longest_paths = []
-        for comparison_type in comparison_variables.keys():
-            for var in comparison_variables[comparison_type].keys():
-                longest_path = self.longest_path_finder(comparison_type, set(), var)
-                longest_paths.append(longest_path)
-
-        # Return the subset of counting_vars_combs with greatest length    
-        # This works non-deterministically, but if we have overlapping yet non-equal
-        #  possibilities, the rule will note be rewritten anyway
-        greatest = []
-        for path in longest_paths:
-            if len(path) > len(greatest):
-                greatest = path
-        return greatest
-
-    def get_counting_variables_eq(self):
-        """
-
-        """
-        comparison_variables=self.comparison_variables_eq
-
-        # For both comparison types, find the longest comparison path starting from each variable
-        longest_paths = []
-        for comparison_type in comparison_variables.keys():
-            for var in comparison_variables[comparison_type].keys():
+        for comparison_type in self.comparison_variables.keys():
+            for var in self.comparison_variables[comparison_type].keys():
                 longest_path = self.longest_path_finder(comparison_type, set(), var)
                 longest_paths.append(longest_path)
 

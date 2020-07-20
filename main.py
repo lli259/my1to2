@@ -5,6 +5,7 @@ import constants
 from transformer import Transformer
 
 
+# TODO: Change cl arguments to fit with new input/output form selection process.
 def define_args(arg_parser):
     """Defines the arguments for this program, the AAgg"""
     arg_parser.description = 'Rewrite ASP logic programs according to Aggregate Equivalence'
@@ -120,9 +121,8 @@ class AutomatedAggregator:
                 transformer = Transformer(b, self.setting, out_fd)
 
                 parse_start = time.time()
-                opfile=open_files(self.setting.ENCODINGS)
                 clingo.parse_program(
-                    opfile,
+                    open_files(self.setting.ENCODINGS),
                     lambda stm: transformer.add_statement(stm))
                 parse_time = time.time() - parse_start
 

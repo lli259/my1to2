@@ -12,9 +12,7 @@ class ASTVisitor(object):
         if isinstance(x, clingo.ast.AST):
             attr = "visit_" + str(x.type)
             if hasattr(self, attr):
-                func=getattr(self, attr)
-                ret_result=func(x, data)
-                return ret_result
+                return getattr(self, attr)(x, data)
             else:
                 after = self.visit_children(x, data)
                 return after
@@ -27,8 +25,7 @@ class ASTVisitor(object):
 
     def visit_children(self, x, data=TreeData()):
         for key in x.child_keys:
-            getattr_tmp=getattr(x, key)
-            child_x = self.visit(getattr_tmp, data)
+            child_x = self.visit(getattr(x, key), data)
             x[key] = child_x
         return x
 
